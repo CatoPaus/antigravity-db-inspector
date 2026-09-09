@@ -19,6 +19,18 @@ When working on large codebases, huge data snapshots (such as 20 MB+ JSON files,
 
 ---
 
+## 📸 Screenshots
+
+| Database Overview | Bloat Scanner |
+|:---:|:---:|
+| ![Database Overview](screenshots/01_databases_overview.png) | ![Bloat Scanner](screenshots/02_bloat_scanner.png) |
+
+| Step Size Breakdown & Distribution | Protobuf Wire Decoder Modal |
+|:---:|:---:|
+| ![Conversation Steps](screenshots/03_steps_detail.png) | ![Protobuf Modal](screenshots/04_protobuf_inspector_modal.png) |
+
+---
+
 ## ✨ Features
 
 - **🔍 Automatic Database Discovery**: Automatically scans and monitors all conversation databases across both the Desktop IDE and CLI daemon.
