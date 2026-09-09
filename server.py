@@ -25,6 +25,24 @@ HOST = "0.0.0.0"
 DESKTOP_CONVERSATIONS_DIR = pathlib.Path.home() / ".gemini" / "antigravity" / "conversations"
 CLI_CONVERSATIONS_DIR = pathlib.Path.home() / ".gemini" / "antigravity-cli" / "conversations"
 
+EXTRA_DB_DIRS = []
+
+def get_all_search_dirs():
+    dirs = [
+        ("desktop", DESKTOP_CONVERSATIONS_DIR),
+        ("cli", CLI_CONVERSATIONS_DIR),
+    ]
+    env_dirs = os.environ.get("ANTIGRAVITY_DB_DIRS") or os.environ.get("ANTIGRAVITY_DB_DIR")
+    if env_dirs:
+        for p in env_dirs.split(":"):
+            if p.strip():
+                pth = pathlib.Path(p.strip()).expanduser()
+                dirs.append((pth.name or "custom", pth))
+    for extra in EXTRA_DB_DIRS:
+        dirs.append((extra.name or "custom", extra))
+    return dirs
+
+
 STEP_TYPE_MAP = {
     0: "UNSPECIFIED",
     3: "PLAN_INPUT",
@@ -288,20 +306,27 @@ def parse_protobuf_fields(data, max_depth=3, current_depth=0):
     return fields
 
 def get_db_path(name, source="desktop"):
-    target_dir = CLI_CONVERSATIONS_DIR if source == "cli" else DESKTOP_CONVERSATIONS_DIR
     clean_name = os.path.basename(name)
     if not clean_name.endswith(".db"):
         clean_name += ".db"
-    path = target_dir / clean_name
-    if not path.is_file():
-        raise FileNotFoundError(f"Database not found: {path}")
-    return path
+    
+    search_dirs = get_all_search_dirs()
+    # Check matching source first
+    for s_name, s_dir in search_dirs:
+        if s_name == source and (s_dir / clean_name).is_file():
+            return s_dir / clean_name
+    # Fallback to search any directory
+    for _, s_dir in search_dirs:
+        if (s_dir / clean_name).is_file():
+            return s_dir / clean_name
+
+    raise FileNotFoundError(f"Database not found: {clean_name}")
 
 class DatabaseService:
     @staticmethod
     def list_databases():
         results = []
-        sources = [("desktop", DESKTOP_CONVERSATIONS_DIR), ("cli", CLI_CONVERSATIONS_DIR)]
+        sources = get_all_search_dirs()
 
         for source_name, folder in sources:
             if not folder.exists():
@@ -349,7 +374,7 @@ class DatabaseService:
     @staticmethod
     def scan_bloat(threshold_bytes=1000000):
         bloat_items = []
-        sources = [("desktop", DESKTOP_CONVERSATIONS_DIR), ("cli", CLI_CONVERSATIONS_DIR)]
+        sources = get_all_search_dirs()
 
         for source_name, folder in sources:
             if not folder.exists():
@@ -1588,13 +1613,29 @@ def main():
     parser = argparse.ArgumentParser(description="Antigravity SQLite DB Inspector")
     parser.add_argument("--port", type=int, default=PORT, help=f"Port to bind (default: {PORT})")
     parser.add_argument("--host", type=str, default=HOST, help=f"Host to bind (default: {HOST})")
+    parser.add_argument("--db-dir", type=str, action="append", default=[], help="Additional database directory to scan")
     args = parser.parse_args()
+
+    for d in args.db_dir:
+        pth = pathlib.Path(d).expanduser().resolve()
+        if pth.is_dir():
+            EXTRA_DB_DIRS.append(pth)
+        else:
+            print(f"Warning: specified --db-dir does not exist: {pth}")
 
     server = ThreadedHTTPServer((args.host, args.port), RequestHandler)
     print(f"==================================================")
     print(f" Antigravity SQLite Database Inspector")
     print(f" Web UI running at: http://localhost:{args.port}/")
     print(f" Listening on:      {args.host}:{args.port}")
+    print(f"")
+    print(f" Discovered Database Locations:")
+    for s_name, s_dir in get_all_search_dirs():
+        if s_dir.exists():
+            cnt = len(list(s_dir.glob("*.db")))
+            print(f"   [{s_name:7s}] {s_dir} ({cnt} DBs)")
+        else:
+            print(f"   [{s_name:7s}] {s_dir} (not found)")
     print(f"==================================================")
     try:
         server.serve_forever()
