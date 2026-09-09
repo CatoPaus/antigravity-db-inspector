@@ -89,6 +89,26 @@ The installer verifies your Python installation, checks Antigravity database pat
 
 ---
 
+## 🔄 When to Restart Antigravity
+
+Antigravity uses SQLite in WAL (Write-Ahead Logging) mode, enabling concurrent read operations:
+
+| Operation | Can Antigravity Be Running? | Restart Required? | Details |
+| :--- | :---: | :---: | :--- |
+| **Browsing Databases** | ✅ Yes | ❌ No | Fully concurrent read-only queries. |
+| **Bloat Scanning** | ✅ Yes | ❌ No | Safe background scan. |
+| **Protobuf Decoding** | ✅ Yes | ❌ No | In-memory wire format parsing. |
+| **Running SQL Queries** | ✅ Yes | ❌ No | Safe `SELECT` queries execute concurrently. |
+| **Manual Backup (`📸 Backup`)** | ✅ Yes | ❌ No | Point-in-time filesystem snapshot. |
+| **Safe Pruning (`⚡ Safe Prune`)** | ⚠️ Yes | 🔄 **Reload Window** | Reload window (`Ctrl+Shift+P` &rarr; *Reload Window*) to sync IDE cache. |
+| **Restoring Backup (`↺ Restore`)** | ⚠️ Yes | 🔄 **Restart IDE** | Restart Antigravity or *Reload Window* so the restored state loads from disk. |
+| **VACUUM Maintenance** | ⚠️ Yes | 🔄 Optional | Rebuilds database file to reclaim unallocated pages. |
+
+> [!TIP]
+> **Fastest Way to Sync**: Instead of quitting the entire application, press **`Ctrl+Shift+P`** (or `Cmd+Shift+P`), type **`Developer: Reload Window`**, and press **Enter**. This flushes Antigravity's in-memory caches and re-reads the updated SQLite database from disk in 1 second.
+
+---
+
 ## 🔍 How Databases Are Automatically Discovered
 
 On Linux (Ubuntu), Antigravity places conversation databases in specific user directories:
