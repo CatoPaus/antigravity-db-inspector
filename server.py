@@ -923,12 +923,17 @@ HTML_PAGE = """<!DOCTYPE html>
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">Oversized Step Scanner (> 1 MB)</div>
+            <div class="card-title">Oversized Step Scanner</div>
             <p style="color:var(--text-muted); font-size:0.85rem; margin-top:4px;">
               Identifies steps whose payloads exceed safe WebChannel streaming limits.
             </p>
           </div>
-          <div style="display:flex; gap:0.5rem;">
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <select id="bloatThreshold" class="search-input" style="width:auto; padding: 0.4rem 0.8rem; background: var(--bg-tertiary); border: 1px solid var(--card-border); color: var(--text); border-radius: 6px; font-size: 0.85rem;" onchange="runBloatScan()">
+              <option value="250000">Threshold: > 250 KB</option>
+              <option value="500000" selected>Threshold: > 500 KB</option>
+              <option value="1000000">Threshold: > 1 MB</option>
+            </select>
             <button class="btn btn-warning" onclick="pruneAllBloat()">⚡ Safe Prune All Bloat</button>
             <button class="btn btn-secondary" onclick="runBloatScan()">Refresh Scan</button>
           </div>
@@ -1141,10 +1146,12 @@ HTML_PAGE = """<!DOCTYPE html>
     async function runBloatScan() {
       const tbody = document.getElementById("bloatTableBody");
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Scanning all conversation databases...</td></tr>';
-      const items = await fetchApi("/api/scan_bloat");
+      const threshEl = document.getElementById("bloatThreshold");
+      const thresh = threshEl ? threshEl.value : 500000;
+      const items = await fetchApi(`/api/scan_bloat?threshold=${thresh}`);
       tbody.innerHTML = "";
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--success); font-weight:600;">🎉 No oversized steps (>1 MB) detected in any database!</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--success); font-weight:600;">🎉 No oversized steps (> ${formatBytes(thresh)}) detected in any database!</td></tr>`;
         return;
       }
       items.forEach(it => {
@@ -1481,7 +1488,9 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/scan_bloat":
             try:
-                items = DatabaseService.scan_bloat()
+                t_str = query.get("threshold", ["500000"])[0]
+                threshold = int(t_str) if t_str.isdigit() else 500_000
+                items = DatabaseService.scan_bloat(threshold_bytes=threshold)
                 self.send_json(items)
             except Exception as e:
                 self.send_error_json(e, 500)
