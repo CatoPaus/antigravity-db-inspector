@@ -138,6 +138,18 @@ STATUS_MAP = {
     11: "QUEUED",
     12: "INTERRUPTED",
 }
+
+# Step types that must NEVER be pruned because they contain core user/planner turns,
+# memory, or internal trajectory state machines (CHECKPOINT) that pre-invocation hooks deserialize.
+PROTECTED_STEP_TYPES = {
+    3,   # PLAN_INPUT
+    14,  # USER_INPUT
+    15,  # PLANNER_RESPONSE
+    23,  # CHECKPOINT (deserialized by pre-invocation context summarization)
+    29,  # MEMORY
+    34,  # RETRIEVE_MEMORY
+    42,  # TRAJECTORY_CHOICE
+}
 def format_bytes(size):
     if size is None:
         return "0 B"
@@ -400,6 +412,7 @@ class DatabaseService:
                             "status": STATUS_MAP.get(status, f"STATUS_{status}"),
                             "size_bytes": sz,
                             "size_formatted": format_bytes(sz),
+                            "is_protected": stype in PROTECTED_STEP_TYPES,
                         })
                     conn.close()
                 except Exception:
@@ -487,6 +500,7 @@ class DatabaseService:
                 "payload_size_bytes": sz or 0,
                 "payload_size_formatted": format_bytes(sz or 0),
                 "metadata_size_bytes": meta_sz or 0,
+                "is_protected": stype in PROTECTED_STEP_TYPES,
             })
 
         return {
@@ -593,13 +607,18 @@ class DatabaseService:
         conn = sqlite3.connect(str(path), timeout=10.0)
         c = conn.cursor()
 
-        c.execute("SELECT idx, step_payload FROM steps WHERE length(step_payload) >= ?", (threshold,))
+        c.execute(f"""
+            SELECT idx, step_payload, step_type
+            FROM steps
+            WHERE length(step_payload) >= ?
+              AND step_type NOT IN ({','.join('?' for _ in PROTECTED_STEP_TYPES)})
+        """, (threshold, *PROTECTED_STEP_TYPES))
         oversized_steps = c.fetchall()
 
         total_steps_pruned = 0
         total_items_pruned = 0
 
-        for idx, payload in oversized_steps:
+        for idx, payload, stype in oversized_steps:
             if not payload:
                 continue
             pruned_p, items_cnt = prune_payload(payload, threshold=threshold)
@@ -636,17 +655,26 @@ class DatabaseService:
         path = get_db_path(name, source)
         before_sz = path.stat().st_size
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = path.parent / f"{path.name}.bak_{ts}"
-        shutil.copy2(str(path), str(backup_path))
-
         conn = sqlite3.connect(str(path), timeout=10.0)
         c = conn.cursor()
-        c.execute("SELECT step_payload FROM steps WHERE idx = ?", (idx,))
+        c.execute("SELECT step_payload, step_type FROM steps WHERE idx = ?", (idx,))
         row = c.fetchone()
         if not row or not row[0]:
             conn.close()
             raise ValueError(f"Step {idx} has no payload")
+
+        stype = row[1]
+        if stype in PROTECTED_STEP_TYPES:
+            conn.close()
+            stype_name = STEP_TYPE_MAP.get(stype, f"Type {stype}")
+            raise ValueError(
+                f"Step #{idx} is a protected {stype_name} step. "
+                "Pruning it would corrupt internal state machine checkpoints."
+            )
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = path.parent / f"{path.name}.bak_{ts}"
+        shutil.copy2(str(path), str(backup_path))
 
         pruned_p, items_cnt = prune_payload(row[0], threshold=threshold)
         c.execute("UPDATE steps SET step_payload = ? WHERE idx = ?", (pruned_p, idx))
@@ -1166,7 +1194,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <td>
             <button class="btn btn-secondary" onclick="openDatabase('${it.db_name}', '${it.source}')">Inspect</button>
             <button class="btn" onclick="inspectStep('${it.db_name}', '${it.source}', ${it.step_idx})">View</button>
-            <button class="btn btn-warning" onclick="pruneSingleStep('${it.db_name}', '${it.source}', ${it.step_idx})">⚡ Prune</button>
+            ${it.is_protected ? `<span class="badge badge-neutral" style="margin-left:4px;" title="System Checkpoint / Turn — Protected to prevent deserialization errors">🛡️ Protected</span>` : `<button class="btn btn-warning" onclick="pruneSingleStep('${it.db_name}', '${it.source}', ${it.step_idx})">⚡ Prune</button>`}
           </td>
         `;
         tbody.appendChild(tr);
@@ -1234,7 +1262,8 @@ HTML_PAGE = """<!DOCTYPE html>
           </td>
           <td>
             <button class="btn" onclick="inspectStep('${currentDb}', '${currentSource}', ${s.idx})">Inspect</button>
-            ${s.payload_size_bytes > 500000 ? `<button class="btn btn-warning" onclick="pruneSingleStep('${currentDb}', '${currentSource}', ${s.idx})">⚡ Prune</button>` : ""}
+            ${s.payload_size_bytes > 500000 && !s.is_protected ? `<button class="btn btn-warning" onclick="pruneSingleStep('${currentDb}', '${currentSource}', ${s.idx})">⚡ Prune</button>` : ""}
+            ${s.is_protected && s.payload_size_bytes > 500000 ? `<span class="badge badge-neutral" style="margin-left:4px;" title="System Checkpoint / Turn — Protected from pruning">🛡️ Protected</span>` : ""}
           </td>
         `;
         tbody.appendChild(tr);
