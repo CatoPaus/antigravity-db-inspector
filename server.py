@@ -1135,8 +1135,8 @@ HTML_PAGE = """<!DOCTYPE html>
       <div class="tip-banner">
         <span class="tip-icon">💡</span>
         <div>
-          <strong>Safe Pruning & IDE Sync:</strong> Pruning removes bloated file diffs while fully preserving prompts, thoughts, and context. 
-          If you prune an active conversation that is currently open in Antigravity, reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Reload Window</em>) or restart Antigravity so the IDE syncs with the pruned database.
+          <strong>Safe Pruning & Sync:</strong> Pruning removes bloated file diffs while fully preserving prompts, thoughts, and context. 
+          If you prune an active conversation currently open in Antigravity, restart <strong>Antigravity 2.0</strong> (or press <code>Ctrl+R</code>), or in <strong>Antigravity IDE</strong> reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Developer: Reload Window</em>) to sync with disk.
         </div>
       </div>
       <div class="card">
@@ -1182,7 +1182,8 @@ HTML_PAGE = """<!DOCTYPE html>
         <span class="tip-icon">💡</span>
         <div>
           <strong>When to restart Antigravity:</strong> Read-only operations (browsing, inspecting, SQL queries) are 100% safe while Antigravity is running. 
-          If you <strong>restore</strong> a backup for an active conversation, restart Antigravity or reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Developer: Reload Window</em>) so the IDE loads the restored state from disk.
+          If you <strong>restore</strong> a backup for an active conversation:
+          restart <strong>Antigravity 2.0</strong> (or press <code>Ctrl+R</code>), or in <strong>Antigravity IDE</strong> reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Developer: Reload Window</em>) so the restored state loads from disk.
         </div>
       </div>
       <div class="stats-grid">
@@ -1265,7 +1266,7 @@ HTML_PAGE = """<!DOCTYPE html>
       <div class="tip-banner">
         <span class="tip-icon">💡</span>
         <div>
-          <strong>Active Session Tip:</strong> Browsing steps and Protobuf structures is safe at all times. If you run <strong>Safe Prune</strong> or <strong>VACUUM</strong> on an active conversation, reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Reload Window</em>) to refresh Antigravity's in-memory cache.
+          <strong>Active Session Tip:</strong> Browsing steps and Protobuf structures is safe at all times. If you run <strong>Safe Prune</strong> or <strong>VACUUM</strong> on an active conversation, restart <strong>Antigravity 2.0</strong> (or press <code>Ctrl+R</code>), or in <strong>Antigravity IDE</strong> reload the window (<code>Ctrl+Shift+P</code> &rarr; <em>Developer: Reload Window</em>) to refresh the in-memory cache.
         </div>
       </div>
 
@@ -1748,7 +1749,7 @@ HTML_PAGE = """<!DOCTYPE html>
     }
 
     async function restoreBackup(backupName, source) {
-      if (!confirm(`⚠️ Are you sure you want to RESTORE this backup?\n\nBackup File: ${backupName}\nSource: ${source}\n\n• An automatic safety snapshot (.pre_restore) will be created first.\n• The active database will be replaced with this backup.\n\n🔄 RESTART REMINDER:\nIf Antigravity is open with this conversation, please restart Antigravity or reload the window (Ctrl+Shift+P -> "Developer: Reload Window") after restoring so the IDE loads the restored state from disk.`)) {
+      if (!confirm(`⚠️ Are you sure you want to RESTORE this backup?\n\nBackup File: ${backupName}\nSource: ${source}\n\n• An automatic safety snapshot (.pre_restore) will be created first.\n• The active database will be replaced with this backup.\n\n🔄 SYNC REMINDER:\nIf this conversation is open in Antigravity:\n• Antigravity 2.0: Restart the app (or press Ctrl+R to reload).\n• Antigravity IDE: Reload window (Ctrl+Shift+P -> "Developer: Reload Window").`)) {
         return;
       }
       try {
@@ -1757,7 +1758,7 @@ HTML_PAGE = """<!DOCTYPE html>
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ backup_name: backupName, source: source })
         });
-        alert(`✅ Restore Completed Successfully!\n\nTarget DB: ${res.target_db}\nRestored Steps: ${res.step_count.toLocaleString()}\nDatabase Size: ${res.size_formatted}\nIntegrity Check: ${res.integrity}\nSafety Snapshot: ${res.pre_restore_backup}\n\n🔄 RESTART ANTIGRAVITY NOW:\nIf this conversation is open in Antigravity, restart Antigravity or reload the window (Ctrl+Shift+P -> "Developer: Reload Window") now to sync.`);
+        alert(`✅ Restore Completed Successfully!\n\nTarget DB: ${res.target_db}\nRestored Steps: ${res.step_count.toLocaleString()}\nDatabase Size: ${res.size_formatted}\nIntegrity Check: ${res.integrity}\nSafety Snapshot: ${res.pre_restore_backup}\n\n🔄 SYNC NOW:\n• Antigravity 2.0: Restart the app (or press Ctrl+R to reload).\n• Antigravity IDE: Press Ctrl+Shift+P -> "Developer: Reload Window".`);
         loadBackups();
         loadDatabases();
       } catch (err) {
@@ -1823,7 +1824,7 @@ HTML_PAGE = """<!DOCTYPE html>
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: currentDb, source: currentSource, threshold: 500000 })
         });
-        alert(`✅ Pruning completed!\n\nSteps pruned: ${res.steps_pruned}\nSpace saved: ${res.saved_formatted}\nNew size: ${res.after_formatted}\nBackup: ${res.backup_path}\n\n🔄 TIP: If this conversation is currently open in Antigravity, reload the window (Ctrl+Shift+P -> "Developer: Reload Window") or restart Antigravity to refresh the trajectory.`);
+        alert(`✅ Pruning completed!\n\nSteps pruned: ${res.steps_pruned}\nSpace saved: ${res.saved_formatted}\nNew size: ${res.after_formatted}\nBackup: ${res.backup_path}\n\n🔄 SYNC TIP: If this conversation is currently open:\n• Antigravity 2.0: Restart the app (or press Ctrl+R to reload).\n• Antigravity IDE: Press Ctrl+Shift+P -> "Developer: Reload Window".`);
         openDatabase(currentDb, currentSource);
       } catch (err) {
         alert("Pruning failed: " + err.message);
@@ -1837,7 +1838,7 @@ HTML_PAGE = """<!DOCTYPE html>
         return;
       }
       const uniqueDbs = [...new Set(items.map(i => JSON.stringify({ name: i.db_name, source: i.source })))].map(s => JSON.parse(s));
-      if (!confirm(`⚡ Safe Prune Bloat across ${uniqueDbs.length} database(s) with oversized steps?\n\n- Creates automatic safety backups for each DB\n- Prunes oversized diffs and snapshots (>500KB)\n- Fully preserves all context, goals, and history\n\n🔄 TIP: After pruning, reload any open conversation windows in Antigravity to sync with disk.`)) return;
+      if (!confirm(`⚡ Safe Prune Bloat across ${uniqueDbs.length} database(s) with oversized steps?\n\n- Creates automatic safety backups for each DB\n- Prunes oversized diffs and snapshots (>500KB)\n- Fully preserves all context, goals, and history\n\n🔄 SYNC TIP: After pruning, restart Antigravity 2.0 or reload window in Antigravity IDE to sync.`)) return;
       
       let totalSaved = 0;
       for (const db of uniqueDbs) {
@@ -1852,7 +1853,7 @@ HTML_PAGE = """<!DOCTYPE html>
           console.error(e);
         }
       }
-      alert(`🎉 All bloated databases safely pruned!\nTotal disk space saved: ${formatBytes(totalSaved)}\n\n🔄 RESTART / RELOAD: If any pruned conversations are open in Antigravity, please reload the window (Ctrl+Shift+P -> "Developer: Reload Window") or restart Antigravity.`);
+      alert(`🎉 All bloated databases safely pruned!\nTotal disk space saved: ${formatBytes(totalSaved)}\n\n🔄 SYNC NOW:\n• Antigravity 2.0: Restart the app (or press Ctrl+R to reload).\n• Antigravity IDE: Press Ctrl+Shift+P -> "Developer: Reload Window".`);
       runBloatScan();
       loadDatabases();
     }

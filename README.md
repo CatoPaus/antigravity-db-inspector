@@ -93,19 +93,22 @@ The installer verifies your Python installation, checks Antigravity database pat
 
 Antigravity uses SQLite in WAL (Write-Ahead Logging) mode, enabling concurrent read operations:
 
-| Operation | Can Antigravity Be Running? | Restart Required? | Details |
+| Operation | Can Antigravity Be Running? | Restart / Sync Required? | Details |
 | :--- | :---: | :---: | :--- |
 | **Browsing Databases** | ✅ Yes | ❌ No | Fully concurrent read-only queries. |
 | **Bloat Scanning** | ✅ Yes | ❌ No | Safe background scan. |
 | **Protobuf Decoding** | ✅ Yes | ❌ No | In-memory wire format parsing. |
 | **Running SQL Queries** | ✅ Yes | ❌ No | Safe `SELECT` queries execute concurrently. |
 | **Manual Backup (`📸 Backup`)** | ✅ Yes | ❌ No | Point-in-time filesystem snapshot. |
-| **Safe Pruning (`⚡ Safe Prune`)** | ⚠️ Yes | 🔄 **Reload Window** | Reload window (`Ctrl+Shift+P` &rarr; *Reload Window*) to sync IDE cache. |
-| **Restoring Backup (`↺ Restore`)** | ⚠️ Yes | 🔄 **Restart IDE** | Restart Antigravity or *Reload Window* so the restored state loads from disk. |
+| **Safe Pruning (`⚡ Safe Prune`)** | ⚠️ Yes | 🔄 **Sync / Reload** | Restart Antigravity 2.0 (or reload IDE window) to sync cache if conversation is active. |
+| **Restoring Backup (`↺ Restore`)** | ⚠️ Yes | 🔄 **Sync / Restart** | Restart Antigravity 2.0 or reload IDE window so the restored state loads from disk. |
 | **VACUUM Maintenance** | ⚠️ Yes | 🔄 Optional | Rebuilds database file to reclaim unallocated pages. |
 
-> [!TIP]
-> **Fastest Way to Sync**: Instead of quitting the entire application, press **`Ctrl+Shift+P`** (or `Cmd+Shift+P`), type **`Developer: Reload Window`**, and press **Enter**. This flushes Antigravity's in-memory caches and re-reads the updated SQLite database from disk in 1 second.
+> [!IMPORTANT]
+> **Syncing Based on Your Antigravity Flavor**:
+> - **Antigravity 2.0 (Desktop Electron App)**: Restart the application (quit and reopen) or press **`Ctrl+R`** / **`Cmd+R`** to reload the app window. *(Note: The `Ctrl+Shift+P` command palette is not available in Antigravity 2.0)*.
+> - **Antigravity IDE (VS Code based)**: Press **`Ctrl+Shift+P`** (or `Cmd+Shift+P`), type **`Developer: Reload Window`**, and press **Enter** for an instant in-memory cache refresh without quitting the editor.
+> - **Antigravity CLI (`agy`)**: Simply start or continue your `agy` command session.
 
 ---
 
