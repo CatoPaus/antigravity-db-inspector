@@ -29,16 +29,25 @@ When working on large codebases, huge data snapshots (such as 20 MB+ JSON files,
 |:---:|:---:|
 | ![Conversation Steps](screenshots/03_steps_detail.png) | ![Protobuf Modal](screenshots/04_protobuf_inspector_modal.png) |
 
+| Backup Manager Dashboard | |
+|:---:|:---:|
+| ![Backup Manager](screenshots/05_backup_manager.png) | |
+
 ---
 
 ## ✨ Features
 
 - **🔍 Automatic Database Discovery**: Automatically scans and monitors all conversation databases across both the Desktop IDE and CLI daemon.
-- **🚨 Bloat Scanner**: 1-click scanner that detects steps exceeding **1 MB** (the threshold that threatens WebChannel remote connections).
+- **🚨 Bloat Scanner**: 1-click scanner that detects steps exceeding configurable thresholds (250 KB / 500 KB / 1 MB) that threaten WebChannel remote connections.
+- **🛡️ Protected Trajectory States**: Strictly protects internal state machine checkpoints (`CHECKPOINT` type 23) and conversational dialog turns (`USER_INPUT`, `PLANNER_RESPONSE`) from pruning to ensure pre-invocation deserialization never fails.
 - **⚡ 1-Click Safe Prune**: Surgically replaces oversized raw file snapshots and massive tool outputs with compact placeholders.
   - **Zero Context Loss**: Preserves 100% of user prompts, agent reasoning, execution plans, tool call arguments, and file paths.
   - **Safety First**: Automatically creates a timestamped `.bak_<timestamp>` backup before modifying any database file.
   - **Instant Reclamation**: Automatically runs `VACUUM` and `PRAGMA integrity_check` to eliminate fragmented disk pages.
+- **💾 Dedicated Backup Manager**: Full visibility and management of all safety snapshots across Desktop and CLI folders.
+  - **1-Click Safe Restore**: Restores any backup while automatically generating a `.pre_restore_<timestamp>` snapshot of the live DB first.
+  - **Manual Snapshots**: 1-click "Backup Now" button on any conversation from the table or detail view.
+  - **Storage Cleanup**: Delete outdated backups with 1-click to reclaim disk space.
 - **🔬 Protobuf Wire Format Decoder**: Unpacks binary BLOBs from the `steps.step_payload` column into fields, wire types, sub-message hierarchies, and UTF-8 string previews.
 - **💻 Interactive SQL Console**: Run ad-hoc SQL queries with one-click presets (`PRAGMA integrity_check`, `Top 20 Largest Steps`, `Show Schema`).
 - **🧹 Storage Maintenance**: 1-click `VACUUM` on any database to reclaim disk space.

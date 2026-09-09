@@ -334,6 +334,19 @@ def get_db_path(name, source="desktop"):
 
     raise FileNotFoundError(f"Database not found: {clean_name}")
 
+def get_backup_path(backup_name, source="desktop"):
+    clean_name = os.path.basename(backup_name)
+    search_dirs = get_all_search_dirs()
+    # Check matching source first
+    for s_name, s_dir in search_dirs:
+        if s_name == source and (s_dir / clean_name).is_file():
+            return s_dir / clean_name
+    # Fallback to search any directory
+    for _, s_dir in search_dirs:
+        if (s_dir / clean_name).is_file():
+            return s_dir / clean_name
+    raise FileNotFoundError(f"Backup file not found: {clean_name}")
+
 class DatabaseService:
     @staticmethod
     def list_databases():
@@ -717,6 +730,152 @@ class DatabaseService:
             "saved_formatted": format_bytes(before_sz - after_sz),
         }
 
+    @staticmethod
+    def list_backups():
+        backups = []
+        sources = get_all_search_dirs()
+        for source_name, folder in sources:
+            if not folder.exists():
+                continue
+            for file_path in folder.glob("*.*"):
+                if not file_path.is_file():
+                    continue
+                fname = file_path.name
+                if fname.endswith("-wal") or fname.endswith("-shm") or fname.endswith("-journal"):
+                    continue
+                if not (".bak" in fname or ".pre_restore" in fname):
+                    continue
+                try:
+                    stat = file_path.stat()
+                    if ".bak" in fname:
+                        target_db = fname.split(".bak")[0]
+                    elif ".pre_restore" in fname:
+                        target_db = fname.split(".pre_restore")[0]
+                    else:
+                        continue
+                    if not target_db.endswith(".db"):
+                        target_db += ".db"
+                    
+                    target_path = folder / target_db
+                    current_sz = target_path.stat().st_size if target_path.exists() else None
+
+                    step_count = None
+                    try:
+                        conn = sqlite3.connect(f"file:{file_path}?mode=ro", uri=True, timeout=1.0)
+                        c = conn.cursor()
+                        c.execute("SELECT count(*) FROM steps")
+                        step_count = c.fetchone()[0]
+                        conn.close()
+                    except Exception:
+                        pass
+
+                    current_step_count = None
+                    if target_path.exists():
+                        try:
+                            conn = sqlite3.connect(f"file:{target_path}?mode=ro", uri=True, timeout=1.0)
+                            c = conn.cursor()
+                            c.execute("SELECT count(*) FROM steps")
+                            current_step_count = c.fetchone()[0]
+                            conn.close()
+                        except Exception:
+                            pass
+
+                    backups.append({
+                        "backup_name": fname,
+                        "target_db": target_db,
+                        "conversation_id": target_db.replace(".db", ""),
+                        "source": source_name,
+                        "backup_path": str(file_path),
+                        "backup_size_bytes": stat.st_size,
+                        "backup_size_formatted": format_bytes(stat.st_size),
+                        "current_size_bytes": current_sz,
+                        "current_size_formatted": format_bytes(current_sz) if current_sz is not None else "N/A",
+                        "mtime": stat.st_mtime,
+                        "mtime_formatted": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                        "step_count": step_count,
+                        "current_step_count": current_step_count,
+                    })
+                except Exception:
+                    pass
+
+        backups.sort(key=lambda x: x["mtime"], reverse=True)
+        return backups
+
+    @staticmethod
+    def create_backup(name, source="desktop"):
+        path = get_db_path(name, source)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{path.name}.bak_{ts}"
+        backup_path = path.parent / backup_name
+        shutil.copy2(str(path), str(backup_path))
+        stat = backup_path.stat()
+        return {
+            "backup_name": backup_name,
+            "backup_path": str(backup_path),
+            "target_db": path.name,
+            "source": source,
+            "size_bytes": stat.st_size,
+            "size_formatted": format_bytes(stat.st_size),
+            "mtime_formatted": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    @staticmethod
+    def restore_backup(backup_name, source="desktop"):
+        backup_path = get_backup_path(backup_name, source)
+        fname = backup_path.name
+        if ".bak" in fname:
+            target_name = fname.split(".bak")[0]
+        elif ".pre_restore" in fname:
+            target_name = fname.split(".pre_restore")[0]
+        else:
+            target_name = fname
+        if not target_name.endswith(".db"):
+            target_name += ".db"
+        target_path = backup_path.parent / target_name
+
+        # Create safety pre-restore snapshot if target exists
+        pre_restore_backup = None
+        if target_path.exists():
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pre_restore_backup = f"{target_path.name}.pre_restore_{ts}"
+            shutil.copy2(str(target_path), str(backup_path.parent / pre_restore_backup))
+
+        # Copy backup over target
+        shutil.copy2(str(backup_path), str(target_path))
+
+        # Check integrity
+        conn = sqlite3.connect(str(target_path), timeout=5.0)
+        c = conn.cursor()
+        c.execute("PRAGMA integrity_check(1)")
+        integrity = c.fetchone()[0]
+        c.execute("SELECT count(*) FROM steps")
+        step_count = c.fetchone()[0]
+        conn.close()
+
+        target_sz = target_path.stat().st_size
+
+        return {
+            "restored_backup": backup_path.name,
+            "target_db": target_name,
+            "source": source,
+            "pre_restore_backup": pre_restore_backup,
+            "integrity": integrity,
+            "step_count": step_count,
+            "size_bytes": target_sz,
+            "size_formatted": format_bytes(target_sz),
+        }
+
+    @staticmethod
+    def delete_backup(backup_name, source="desktop"):
+        backup_path = get_backup_path(backup_name, source)
+        sz = backup_path.stat().st_size
+        os.remove(str(backup_path))
+        return {
+            "deleted_backup": backup_name,
+            "freed_bytes": sz,
+            "freed_formatted": format_bytes(sz),
+        }
+
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -896,6 +1055,7 @@ HTML_PAGE = """<!DOCTYPE html>
     <div class="nav-tabs">
       <button class="nav-btn active" onclick="showTab('databases')">Databases</button>
       <button class="nav-btn" onclick="showTab('bloat')">Bloat Scanner 🚨</button>
+      <button class="nav-btn" onclick="showTab('backups')">Backups 💾</button>
       <button class="nav-btn" onclick="showTab('detail')" id="tabDetailBtn" style="display:none;">DB Detail</button>
       <button class="nav-btn" onclick="showTab('sql')">SQL Console</button>
     </div>
@@ -985,6 +1145,59 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- TAB: BACKUP MANAGER -->
+    <section id="tab-backups" style="display:none;">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Backups</div>
+          <div class="stat-val" id="bkTotalCount">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Backup Storage Used</div>
+          <div class="stat-val" id="bkTotalSize">0 B</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Most Recent Backup</div>
+          <div class="stat-val" id="bkLatestTime" style="font-size:1.1rem;">None</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Conversation Database Backups</div>
+            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:4px;">
+              Manage, restore, or delete safety snapshots. Restoring automatically creates a safety snapshot before overwriting.
+            </p>
+          </div>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <select id="backupTargetDbSelect" class="search-input" style="width:auto; padding:0.4rem 0.8rem; background:var(--bg-tertiary); border:1px solid var(--card-border); color:var(--text); border-radius:6px; font-size:0.85rem;">
+              <option value="">Select DB to backup...</option>
+            </select>
+            <button class="btn btn-primary" onclick="createManualBackupFromDropdown()">+ Backup Selected DB</button>
+            <button class="btn btn-secondary" onclick="loadBackups()">Refresh</button>
+          </div>
+        </div>
+        <table id="backupsTable">
+          <thead>
+            <tr>
+              <th>Target Conversation</th>
+              <th>Source</th>
+              <th>Backup File</th>
+              <th>Date Created</th>
+              <th>Backup Size</th>
+              <th>Live Size</th>
+              <th>Steps (Bak / Live)</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="backupsTableBody">
+            <tr><td colspan="8" style="text-align:center;">Loading backups...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- TAB: DB DETAIL & STEPS -->
     <section id="tab-detail" style="display:none;">
       <div class="actions-row">
@@ -1021,6 +1234,7 @@ HTML_PAGE = """<!DOCTYPE html>
               <option value="idx_desc">Index (N → 1)</option>
               <option value="size_desc" selected>Size (Largest First)</option>
             </select>
+            <button class="btn btn-secondary" onclick="createBackupForDb(currentDb, currentSource)">📸 Backup Now</button>
             <button class="btn btn-warning" onclick="pruneCurrentDbBloat()">⚡ Safe Prune Bloat</button>
             <button class="btn btn-secondary" onclick="vacuumCurrentDb()">Run VACUUM</button>
           </div>
@@ -1115,6 +1329,7 @@ HTML_PAGE = """<!DOCTYPE html>
       if (btn) btn.classList.add("active");
 
       if (tabName === 'bloat') runBloatScan();
+      if (tabName === 'backups') loadBackups();
       if (tabName === 'sql') populateSqlDbs();
     }
 
@@ -1122,6 +1337,7 @@ HTML_PAGE = """<!DOCTYPE html>
       const data = await fetchApi("/api/databases");
       allDbs = data;
       renderDatabases(allDbs);
+      populateBackupDbDropdown();
 
       document.getElementById("statTotalDbs").textContent = allDbs.length;
       const totalBytes = allDbs.reduce((acc, d) => acc + d.size_bytes, 0);
@@ -1159,6 +1375,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <td style="color:var(--text-muted); font-size:0.85rem;">${db.mtime_formatted}</td>
           <td>
             <button class="btn" onclick="openDatabase('${db.name}', '${db.source}')">Inspect</button>
+            <button class="btn btn-secondary" onclick="createBackupForDb('${db.name}', '${db.source}')" title="Create safety snapshot">📸 Backup</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -1394,6 +1611,132 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    let allBackups = [];
+
+    async function loadBackups() {
+      const tbody = document.getElementById("backupsTableBody");
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Scanning for backup files...</td></tr>';
+      try {
+        const backups = await fetchApi("/api/backups");
+        allBackups = backups;
+        renderBackups(allBackups);
+        populateBackupDbDropdown();
+
+        document.getElementById("bkTotalCount").textContent = allBackups.length;
+        const totalBytes = allBackups.reduce((acc, b) => acc + (b.backup_size_bytes || 0), 0);
+        document.getElementById("bkTotalSize").textContent = formatBytes(totalBytes);
+        document.getElementById("bkLatestTime").textContent = allBackups.length > 0 ? allBackups[0].mtime_formatted : "None";
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--danger);">Error loading backups: ${err.message}</td></tr>`;
+      }
+    }
+
+    function populateBackupDbDropdown() {
+      const sel = document.getElementById("backupTargetDbSelect");
+      if (!sel || !allDbs) return;
+      sel.innerHTML = '<option value="">Select DB to backup...</option>';
+      allDbs.forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = JSON.stringify({ name: d.name, source: d.source });
+        opt.textContent = `${d.conversation_id.slice(0, 16)}... (${d.source}, ${d.size_formatted})`;
+        sel.appendChild(opt);
+      });
+    }
+
+    function renderBackups(backups) {
+      const tbody = document.getElementById("backupsTableBody");
+      tbody.innerHTML = "";
+      if (backups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No backup files (.bak / .pre_restore) found.</td></tr>';
+        return;
+      }
+
+      backups.forEach(b => {
+        const tr = document.createElement("tr");
+        const stepsText = (b.step_count !== null)
+          ? `${b.step_count.toLocaleString()} / ${b.current_step_count !== null ? b.current_step_count.toLocaleString() : 'N/A'}`
+          : 'N/A';
+
+        tr.innerHTML = `
+          <td style="font-family:monospace; font-weight:600; color:var(--accent);">
+            <a href="javascript:void(0)" onclick="openDatabase('${b.target_db}', '${b.source}')" style="color:var(--accent); text-decoration:none;" title="Inspect live database">
+              ${b.conversation_id}
+            </a>
+          </td>
+          <td><span class="badge ${b.source === 'desktop' ? 'badge-neutral' : 'badge-warning'}">${b.source}</span></td>
+          <td style="font-family:monospace; font-size:0.8rem; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${b.backup_name}">${b.backup_name}</td>
+          <td style="color:var(--text-muted); font-size:0.85rem;">${b.mtime_formatted}</td>
+          <td style="font-weight:600;">${b.backup_size_formatted}</td>
+          <td style="color:var(--text-muted);">${b.current_size_formatted}</td>
+          <td style="font-size:0.85rem;">${stepsText}</td>
+          <td>
+            <button class="btn btn-primary" onclick="restoreBackup('${b.backup_name}', '${b.source}')" title="Restore this backup onto the active database">↺ Restore</button>
+            <button class="btn btn-secondary" onclick="deleteBackup('${b.backup_name}', '${b.source}')" title="Delete backup file">🗑️</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function createManualBackupFromDropdown() {
+      const sel = document.getElementById("backupTargetDbSelect");
+      if (!sel || !sel.value) {
+        alert("Please select a database from the dropdown first.");
+        return;
+      }
+      const item = JSON.parse(sel.value);
+      await createBackupForDb(item.name, item.source);
+    }
+
+    async function createBackupForDb(name, source) {
+      try {
+        const res = await fetchApi("/api/backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name, source: source })
+        });
+        alert(`📸 Backup Created Successfully!\n\nBackup File: ${res.backup_name}\nSize: ${res.size_formatted}\nSaved to: ${res.backup_path}`);
+        if (typeof loadBackups === "function") loadBackups();
+      } catch (err) {
+        alert("Backup failed: " + err.message);
+      }
+    }
+
+    async function restoreBackup(backupName, source) {
+      if (!confirm(`⚠️ Are you sure you want to RESTORE this backup?\n\nBackup File: ${backupName}\nSource: ${source}\n\n• An automatic safety snapshot (.pre_restore) will be made first.\n• The active database will be replaced with this backup snapshot.`)) {
+        return;
+      }
+      try {
+        const res = await fetchApi("/api/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ backup_name: backupName, source: source })
+        });
+        alert(`✅ Restore Completed Successfully!\n\nTarget DB: ${res.target_db}\nRestored Steps: ${res.step_count}\nDatabase Size: ${res.size_formatted}\nIntegrity Check: ${res.integrity}\n\nSafety Pre-Restore Snapshot: ${res.pre_restore_backup}`);
+        loadBackups();
+        loadDatabases();
+      } catch (err) {
+        alert("Restore failed: " + err.message);
+      }
+    }
+
+    async function deleteBackup(backupName, source) {
+      if (!confirm(`🗑️ Permanently delete backup file?\n\nFile: ${backupName}\n\nThis action cannot be undone.`)) {
+        return;
+      }
+      try {
+        const res = await fetchApi("/api/delete_backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ backup_name: backupName, source: source })
+        });
+        alert(`🗑️ Backup deleted! Freed ${res.freed_formatted}.`);
+        loadBackups();
+      } catch (err) {
+        alert("Delete failed: " + err.message);
+      }
+    }
+
     function formatBytes(bytes) {
       if (!bytes) return "0 B";
       const units = ["B", "KB", "MB", "GB"];
@@ -1569,6 +1912,14 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error_json(e, 404)
             return
 
+        if path == "/api/backups":
+            try:
+                backups = DatabaseService.list_backups()
+                self.send_json(backups)
+            except Exception as e:
+                self.send_error_json(e, 500)
+            return
+
         self.send_error_json("Not Found", 404)
 
     def do_POST(self):
@@ -1635,6 +1986,45 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 return
             try:
                 res = DatabaseService.vacuum_db(name, source)
+                self.send_json(res)
+            except Exception as e:
+                self.send_error_json(e, 500)
+            return
+
+        if path == "/api/backup":
+            name = params.get("name", "")
+            source = params.get("source", "desktop")
+            if not name:
+                self.send_error_json("Field 'name' required")
+                return
+            try:
+                res = DatabaseService.create_backup(name, source)
+                self.send_json(res)
+            except Exception as e:
+                self.send_error_json(e, 500)
+            return
+
+        if path == "/api/restore":
+            backup_name = params.get("backup_name", "")
+            source = params.get("source", "desktop")
+            if not backup_name:
+                self.send_error_json("Field 'backup_name' required")
+                return
+            try:
+                res = DatabaseService.restore_backup(backup_name, source)
+                self.send_json(res)
+            except Exception as e:
+                self.send_error_json(e, 500)
+            return
+
+        if path == "/api/delete_backup":
+            backup_name = params.get("backup_name", "")
+            source = params.get("source", "desktop")
+            if not backup_name:
+                self.send_error_json("Field 'backup_name' required")
+                return
+            try:
+                res = DatabaseService.delete_backup(backup_name, source)
                 self.send_json(res)
             except Exception as e:
                 self.send_error_json(e, 500)
